@@ -1,3 +1,150 @@
+
+# Générer un rapport complet
+generate_full_report() {
+    local path=${1:-$CUSTOM_MODULES_PATH}
+    
+    echo -e "${BLUE}Génération d'un rapport complet...${NC}"
+    create_reports_dir
+    
+    local report_file="$REPORTS_DIR/quality-report-$(date +%Y%m%d_%H%M%S).html"
+    
+    # Créer le rapport HTML
+    cat > "$report_file" << EOF
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rapport de Qualité de Code - $(date)</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .header { background: #f4f4f4; padding: 20px; border-radius: 5px; }
+        .section { margin: 20px 0; padding: 15px; border-left: 4px solid #007cba; }
+        .success { border-left-color: #28a745; }
+        .warning { border-left-color: #ffc107; }
+        .error { border-left-color: #dc3545; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 3px; overflow-x: auto; }
+        .summary { background: #e9ecef; padding: 15px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Rapport de Qualité de Code</h1>
+        <p><strong>Date:</strong> $(date)</p>
+        <p><strong>Chemin analysé:</strong> $path</p>
+    </div>
+EOF
+    
+    # Exécuter les analyses et ajouter au rapport
+    run_all "$path"
+    local exit_code=$?
+    
+    # Ajouter les résultats au rapport HTML
+    for tool in phpstan phpcs phpmd phpcpd; do
+        if [ -f "$REPORTS_DIR/${tool}-report.txt" ]; then
+            echo "<div class=\"section\">" >> "$report
+            echo "<h2>Rapport $tool</h2>" >> "$report_file"
+            echo "<pre>" >> "$report_file"
+            cat "$REPORTS_DIR/${tool}-report.txt" >> "$report_file"
+            echo "</pre>" >> "$report_file"
+            echo "</div>" >> "$report_file"
+        fi
+    done
+    
+    # Fermer le HTML
+    cat >> "$report_file" << EOF
+    <div class="summary">
+        <h2>Résumé</h2>
+        <p>Analyse terminée le $(date)</p>
+        <p>Rapports individuels disponibles dans le dossier: $REPORTS_DIR</p>
+    </div>
+</body>
+</html>
+EOF
+    
+    echo -e "${GREEN}Rapport HTML généré: $report_file${NC}"
+    
+    # Générer aussi un rapport texte
+    local text_report="$REPORTS_DIR/quality-summary-$(date +%Y%m%d_%H%M%S).txt"
+    cat > "$text_report" << EOF
+=== RAPPORT DE QUALITÉ DE CODE ===
+Date: $(date)
+Chemin: $path
+
+EOF
+    
+    for tool in phpstan phpcs phpmd phpcpd; do
+        if [ -f "$REPORTS_DIR/${tool}-report.txt" ]; then
+            echo "=== $tool ===" >> "$text_report"
+            cat "$REPORTS_DIR/${tool}-report.txt" >> "$text_report"
+            echo "" >> "$text_report"
+        fi
+    done
+    
+    echo -e "${GREEN}Rapport texte généré: $text_report${NC}"
+    
+    return $exit_code
+}
+
+# Fonction pour afficher les statistiques
+show_stats() {
+    local path=${1:-$CUSTOM_MODULES_PATH}
+    
+    check_path "$path"
+    
+    echo -e "${BLUE}=== Statistiques du code ===${NC}"
+    
+    # Compter les fichiers
+    local php_files=$(find "$path" -name "*.php" -type f | wc -l)
+    local module_files=$(find "$path" -name "*.module" -type f | wc -l)
+    local total_files=$((php_files + module_files))
+    
+    echo -e "${YELLOW}Fichiers:${NC}"
+    echo "  - Fichiers PHP: $php_files"
+    echo "  - Fichiers .module: $module_files"
+    echo "  - Total: $total_files"
+    
+    # Compter les lignes de code
+    if command -v cloc &> /dev/null; then
+        echo -e "\n${YELLOW}Lignes de code:${NC}"
+        cloc "$path" --quiet
+    else
+        local total_lines=$(find "$path" -name "*.php" -o -name "*.module" | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}')
+        echo "  - Total lignes: $total_lines"
+    fi
+    
+    # Taille des fichiers
+    local total_size=$(du -sh "$path" 2>/dev/null | cut -f1)
+    echo -e "\n${YELLOW}Taille totale:${NC} $total_size"
+}
+
+
+# Créer la configuration PHPStan
+create_phpstan_config() {
+    if [ -f "phpstan.neon" ]; then
+        return
+    fi
+    
+    echo -e "${YELLOW}Création de phpstan.neon...${NC}"
+    cat > phpstan.neon << 'EOF'
+parameters:
+  level: 1
+  paths:
+    - web/modules/custom
+    - web/themes/custom
+  excludePaths:
+    - */node_modules/*
+    - */vendor/*
+    - */tests/*
+  extensions:
+    - mglaman\PHPStanDrupal\Extension
+  ignoreErrors:
+    - '#\Drupal calls should be avoided in classes, use dependency injection instead#'
+    - '#Plugin definitions cannot be altered#'
+  drupal:
+    drupal_root: web
+EOF
+}
+
+
 # Génération de rapports
 generate_reports() {
     local report_dir="reports"
